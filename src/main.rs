@@ -158,10 +158,6 @@ impl BinUtil {
     }
 }
 fn get_class(mm: &MetadataUtil, bn: &BinUtil, type_index: i32) {
-<<<<<<< HEAD
- 
-=======
->>>>>>> ee74e764a8b89b288e81b7a509966555e0568748
     // let file_data = std::fs::read(metadata_path).expect("Failed to read file");
     // let mm = MetadataUtil::new(file_data);
     // let raw_metadata = &mm.metadata_hdr;
