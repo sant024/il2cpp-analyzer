@@ -1,5 +1,5 @@
 # il2cpp-analyzer 
- *This is the supplemental tool for reverse engineering Unity IL2CPP games*
+ *This is the supplemental tool for reverse engineering a Unity IL2CPP game*
 ![Alt text](Untitled.png)
 
 
