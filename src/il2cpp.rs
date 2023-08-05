@@ -98,6 +98,8 @@ pub const PARAM_ATTRIBUTE_RESERVED_MASK: u32 = 0xf000;
 pub const PARAM_ATTRIBUTE_HAS_DEFAULT: u32 = 0x1000;
 pub const PARAM_ATTRIBUTE_HAS_FIELD_MARSHAL: u32 = 0x2000;
 pub const PARAM_ATTRIBUTE_UNUSED: u32 = 0xcfe0;
+
+#[allow(non_camel_case_types)]
 #[repr(u32)]
 pub enum Il2CppTypeEnum {
     IL2CPP_TYPE_END = 0x00,

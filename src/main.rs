@@ -1,10 +1,15 @@
+mod app;
 mod binary;
+mod helper;
 mod il2cpp;
 mod metadata;
 mod utils;
 use std::io::Cursor;
 
+use crate::app::App;
 use crate::binary::*;
+use crate::helper::ClassView;
+use crate::helper::DataView;
 use crate::il2cpp::*;
 use crate::metadata::*;
 use crate::utils::*;
@@ -12,6 +17,8 @@ use crate::utils::*;
 use anyhow::Result;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use eframe::egui;
 use object::read::elf::ElfFile32;
 use object::read::elf::ElfFile64;
 use object::{read::elf::ElfFile, Object};
@@ -47,15 +54,9 @@ impl MetadataUtil {
     }
     pub fn get_string(&self, idx: i32) -> Option<String> {
         if idx < self.metadata_hdr.string_count {
-            // let offset_stringloc = &self.data[(self.metadata_hdr.string_offset + idx) as usize..];
-            // unsafe {
-            //     let name = str_from_u8_nul_utf8_unchecked(offset_stringloc);
-            //     Some(name.to_string())
-            // }
-
             let name =
                 get_str(&self.data, (self.metadata_hdr.string_offset + idx) as usize).unwrap();
-            //println!("get_string : {}", name);
+
             Some(name.to_string())
         } else {
             None
@@ -157,7 +158,7 @@ impl BinUtil {
         self.metadata_registration.field_offset_addrs[field_index]
     }
 }
-fn get_class(mm: &MetadataUtil, bn: &BinUtil, type_index: i32) {
+fn get_class(dv: &mut DataView, mm: &MetadataUtil, bn: &BinUtil, type_index: i32) {
     // let file_data = std::fs::read(metadata_path).expect("Failed to read file");
     // let mm = MetadataUtil::new(file_data);
     // let raw_metadata = &mm.metadata_hdr;
@@ -176,36 +177,38 @@ fn get_class(mm: &MetadataUtil, bn: &BinUtil, type_index: i32) {
     println!("[Namespace: {}]", namespace);
     let mut attr_builder = String::new();
 
-    if ((def.flags as u32 & TYPE_ATTRIBUTE_SERIALIZABLE) != 0) {
+    if (def.flags as u32 & TYPE_ATTRIBUTE_SERIALIZABLE) != 0 {
         attr_builder.push_str("[Serializable] ");
     }
 
-    if ((def.flags as u32 & TYPE_ATTRIBUTE_VISIBILITY_MASK) == TYPE_ATTRIBUTE_PUBLIC) {
+    if (def.flags as u32 & TYPE_ATTRIBUTE_VISIBILITY_MASK) == TYPE_ATTRIBUTE_PUBLIC {
         attr_builder.push_str("public ");
     }
 
-    if (def.flags as u32 & TYPE_ATTRIBUTE_ABSTRACT != 0) {
+    if def.flags as u32 & TYPE_ATTRIBUTE_ABSTRACT != 0 {
         attr_builder.push_str("abstract");
     }
 
-    if (def.flags as u32 & TYPE_ATTRIBUTE_SEALED != 0) {
+    if def.flags as u32 & TYPE_ATTRIBUTE_SEALED != 0 {
         attr_builder.push_str("sealed ");
     }
 
-    if (def.flags as u32 & TYPE_ATTRIBUTE_INTERFACE != 0) {
+    if def.flags as u32 & TYPE_ATTRIBUTE_INTERFACE != 0 {
         attr_builder.push_str(" interface ");
     } else {
         attr_builder.push_str("class ");
     }
+    let mut cv = ClassView::new();
 
     let class_name = mm.get_string(def.name_index).unwrap();
+    cv.name = class_name.clone();
     let class_line = format!("{} {}", attr_builder, class_name);
     println!("{}", class_line);
 
     println!("\t Fields");
 
     // u16 (-1) 65535
-    let field_start: usize = def.field_start as usize; // should be 0..0.0,3,33  then but it starts at 65535 at {class idx0}?  ( LOL WAS i32 so -1 value became 65535) ( (wrong field count) was the parsers fault!)
+    let field_start: usize = def.field_start as usize;
 
     // println!("[!] field start: {}", def.field_start);
     // println!("[!] field count: {}", def.field_count);
@@ -213,7 +216,7 @@ fn get_class(mm: &MetadataUtil, bn: &BinUtil, type_index: i32) {
 
     let field_end = def.field_start as usize + def.field_count as usize;
     for field_index in field_start..field_end {
-        get_field(&mm, &bn, field_index as i32);
+        get_field(&mut cv, &mm, &bn, field_index as i32);
     }
 
     println!("\t Methods");
@@ -221,8 +224,10 @@ fn get_class(mm: &MetadataUtil, bn: &BinUtil, type_index: i32) {
     let method_start: usize = def.method_start as usize;
 
     for method_index in method_start..def.method_count as usize {
-        get_method(&mm, &bn, method_index as i32);
+        get_method(&mut cv, &mm, &bn, method_index as i32);
     }
+
+    dv.class_dump.push(cv);
 }
 
 fn type_string_for_id(id: i32) -> String {
@@ -286,7 +291,7 @@ fn get_type_name(type_: &Type) -> String {
     return ret;
 }
 
-fn get_field(mm: &MetadataUtil, bn: &BinUtil, field_index: i32) {
+pub fn get_field(cv: &mut ClassView, mm: &MetadataUtil, bn: &BinUtil, field_index: i32) -> String {
     // when 4,5 nothing prints?
     // the field index is wrong
     //println!("idx: {}", field_index);
@@ -322,13 +327,15 @@ fn get_field(mm: &MetadataUtil, bn: &BinUtil, field_index: i32) {
     let line_field = format!("{} {} {}", modifier, type_name, field_name);
 
     //let offset = bn.get_field_offset_by_id(field_index as usize);
+    cv.fields.push(line_field.clone());
     println!("\t {} ", line_field); // #0x{:x} check offset if correct
 
+    return line_field;
     // add field defaults " = .. ";
     //let field_default = mm.get_field_default_by_id(field_index).unwrap();
 }
 
-fn get_method(mm: &MetadataUtil, bn: &BinUtil, method_index: i32) {
+fn get_method(cv: &mut ClassView, mm: &MetadataUtil, bn: &BinUtil, method_index: i32) {
     // let method_ptrs_count = bn.code_registration.method_pointers.len();  // get_method in main()
     // println!("method ptrs count: {}", method_ptrs_count);
     // for method_index in 0..method_ptrs_count
@@ -415,7 +422,7 @@ fn get_method(mm: &MetadataUtil, bn: &BinUtil, method_index: i32) {
     //println!("method definiton offset: {:x}", offset);
 
     method_line.push_str(&format!("); //{:x}", offset));
-
+    cv.methods.push(method_line.clone());
     println!("{}", method_line);
 
     // let image_count =
@@ -428,11 +435,25 @@ fn get_method(mm: &MetadataUtil, bn: &BinUtil, method_index: i32) {
 }
 
 fn main() {
-    // let mut line = String::new();
-    // let input = std::io::stdin()
-    //     .read_line(&mut line)
-    //     .expect("Failed to read line");
+    //let native_options = eframe::NativeOptions::default();
+    let mut dv: DataView = cli();
 
+    let native_options = eframe::NativeOptions {
+        initial_window_size: Option::from(egui::Vec2::new(575 as f32, 350 as f32)),
+        resizable: false,
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "IL2CPP Analysis",
+        native_options,
+        Box::new(|cc| Box::new(App::new(cc, dv))),
+    );
+
+    //cli();
+}
+
+fn cli() -> DataView {
     let metadata_path = concat!(env!("CARGO_MANIFEST_DIR"), "\\global-metadata.dat");
     let sodata_path: &str = concat!(env!("CARGO_MANIFEST_DIR"), "\\libil2cpp.so");
     let file_data = std::fs::read(metadata_path).expect("Failed to read file");
@@ -444,38 +465,45 @@ fn main() {
     println!("Loader Sanity: {}", metadata_hdr.sanity);
     println!("Loader Version: {}", metadata_hdr.version);
 
+    // let mut line = String::new();
+    // let input = std::io::stdin()
+    //     .read_line(&mut line)
+    //     .expect("Failed to read line");
+
     let mm = MetadataUtil::new(file_data);
     //  must know if elf file is 32 or 64 binary
     let bn = BinUtil::new(so_data);
 
+    let mut dv = DataView::new();
+
     let image_count =
         mm.metadata_hdr.images_count / std::mem::size_of::<Il2CppImageDefinition>() as i32;
 
-    // get image definition
-    // for image_index in 0..image_count {
-    //     let s_image_definition = mm.get_image_definition_by_id(image_index).unwrap();
-    //     let image_name = mm.get_string(s_image_definition.name_index).unwrap();
-    //     let image_typestart = s_image_definition.type_start;
-    //     println!(" -- Image Info {0}, {1}", image_name, image_typestart);
+    //get image definition
+    for image_index in 0..image_count {
+        let s_image_definition = mm.get_image_definition_by_id(image_index).unwrap();
+        let image_name = mm.get_string(s_image_definition.name_index).unwrap();
+        let image_typestart = s_image_definition.type_start;
+        println!(" -- Image Info {0}, {1}", image_name, image_typestart);
+        dv.image.push(image_name);
+        // get type definition for image
+        let type_end =
+            s_image_definition.type_start as usize + s_image_definition.type_count as usize;
+        for type_index in s_image_definition.type_start as usize..type_end {
+            //println!("type index: {}", type_index);
+            let s_type_definition = mm.get_type_definition_by_id(type_index as i32).unwrap();
+            let type_name = mm.get_string(s_type_definition.name_index).unwrap();
 
-    //     // get type definition for image
-    //     let type_end =
-    //         s_image_definition.type_start as usize + s_image_definition.type_count as usize;
-    //     for type_index in s_image_definition.type_start as usize..type_end {
-    //         //println!("type index: {}", type_index);
-    //         let s_type_definition = mm.get_type_definition_by_id(type_index as i32).unwrap();
-    //         let type_name = mm.get_string(s_type_definition.name_index).unwrap();
+            println!("(*) Typename: {}", type_name);
+            // println!(
+            //     "namespace type index: {}",
+            //     s_type_definition.namespace_index
+            // );
+            let type_namespace = mm.get_string(s_type_definition.namespace_index).unwrap();
 
-    //         println!("(*) Typename: {}", type_name);
-    //         // println!(
-    //         //     "namespace type index: {}",
-    //         //     s_type_definition.namespace_index
-    //         // );
-    //         let type_namespace = mm.get_string(s_type_definition.namespace_index).unwrap();
-
-    //         println!("(*) Namespace: {}", type_namespace);
-    //     }
-    // }
+            println!("(*) Namespace: {}", type_namespace);
+        }
+    }
 
     let ui_num_types =
         mm.metadata_hdr.type_definitions_count / std::mem::size_of::<Il2CppTypeDefinition>() as i32;
@@ -483,9 +511,10 @@ fn main() {
     println!("ui_num_types: {}", ui_num_types);
 
     for i in 0..ui_num_types {
-        get_class(&mm, &bn, i);
+        get_class(&mut dv, &mm, &bn, i);
     }
 
+    return dv;
     //get_class(&elf_file);
     //get_method(&elf_file);
 }
