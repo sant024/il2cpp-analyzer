@@ -1,14 +1,15 @@
-# il2cpp-analyzer
-Extract IL2CPP metadata for reversing Unity
-
-## Information
-This is the supplemental tool for reverse engineering Unity IL2CPP games
-
-## Preview 
+# il2cpp-analyzer 
+ *This is the supplemental tool for reverse engineering Unity IL2CPP games*
 ![Alt text](Untitled.png)
 
-The supported Unity header version is 20/21. It has only been tested on 32-bit ELF files. 
+
+### Features
+- Extract IL2CPP metadata for reversing 
+- Support for Unity header version 20/21
+- 32-bit ELF files
 
 
-## Acknowledgements
-Originally inspired by [ILL2CPP Inspector](https://github.com/djkaty/Il2CppInspector/)
+
+
+
+**Originally inspired by [Il2CppInspector](https://github.com/djkaty/Il2CppInspector/)**
